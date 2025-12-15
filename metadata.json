@@ -1,0 +1,7 @@
+{
+  "name": "SorAIFarm",
+  "description": "Asisten Pertanian Sorgum Cerdas bertenaga AI. Fitur prediksi iklim, rekomendasi tanam, estimasi panen, dan analisis pasar.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
