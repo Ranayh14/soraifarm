@@ -5,7 +5,7 @@ import { Screen } from '../types';
 import { getRealTimeWeather } from '../services/weatherService';
 import { ClimateData } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, LineChart } from 'recharts';
-import { generateMockMarketData, formatChartDate, formatFullDate, generateDateRange } from '../utils/dateUtils';
+import { transformMarketDataToChart, generateDummyMarketData } from '../utils/chartUtils';
 
 interface HomeViewProps {
   onNavigate: (screen: Screen) => void;
@@ -118,16 +118,37 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
       })
       .catch(err => {
         console.error('Failed to fetch market data:', err);
+        // Generate dummy data if API fails
+        setMarketData([]);
         setLoading(false);
       });
 
-    // FIXED: Fetch Featured Recipes - 5 resep dengan views terbanyak
+    // FIXED: Fetch Featured Recipes - 5 resep dengan views terbanyak dari database real
     fetch('http://localhost:3001/api/recipes?category=All&popular=true')
       .then(res => res.json())
       .then(data => {
-        setRecipes(data.slice(0, 5)); // Top 5 recipes by views
+        if (data && Array.isArray(data) && data.length > 0) {
+          // Transform data dari API
+          const transformedData = data.map((r: any) => ({
+            id: String(r.id),
+            title: r.title,
+            image: r.image_url,
+            image_url: r.image_url,
+            views: r.views || 0
+          }));
+          // Sort by views (descending) and take top 5
+          const sortedByViews = [...transformedData].sort((a, b) => (b.views || 0) - (a.views || 0));
+          setRecipes(sortedByViews.slice(0, 5)); // Top 5 recipes by views
+        } else {
+          // Jika tidak ada data, set empty array
+          setRecipes([]);
+        }
       })
-      .catch(err => console.error('Failed to fetch recipes:', err));
+      .catch(err => {
+        console.error('Failed to fetch recipes:', err);
+        // Set empty array jika error, tidak menggunakan dummy data
+        setRecipes([]);
+      });
   }, [user]);
 
   const handleLocationSaveWithSuggestion = async (suggestion: any) => {
@@ -199,41 +220,22 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
     }
   };
 
-  // FIXED: Format market data untuk chart - 7 hari terakhir dengan tanggal dinamis dari utility
-  const chartData = marketData.length > 0 ? marketData
-    .map(item => {
-      // Parse tanggal dari API response
-      let date: Date;
-      if (item.date && typeof item.date === 'string') {
-        const parts = item.date.split('-');
-        if (parts.length === 3) {
-          const [year, month, day] = parts.map(Number);
-          date = new Date(year, month - 1, day, 12, 0, 0);
-        } else {
-          date = new Date(item.date);
-        }
-      } else {
-        // Fallback: generate dari index (7 hari terakhir)
-        const dates = generateDateRange(7);
-        const index = marketData.indexOf(item);
-        date = dates[Math.min(index, dates.length - 1)];
-      }
-      
-      return {
-        name: formatChartDate(date, true), // Include day name for 7 days
-        price: item.average_price || 2500,
-        volume: item.sales_volume || 100,
-        fullDate: formatFullDate(date),
-        dateValue: date.getTime()
-      };
-    })
-    .sort((a, b) => a.dateValue - b.dateValue)
-    : generateMockMarketData(7, 2500, 100); // Generate 7 days of mock data with fluctuations
+  // FIXED: Format market data untuk chart - 7 hari terakhir dengan tanggal dinamis dari hari ini
+  // Menggunakan utility function untuk generate tanggal dan data yang realistis
+  const chartData = marketData.length > 0 
+    ? transformMarketDataToChart(marketData, 7)
+    : generateDummyMarketData(7, 2500, 100);
 
-  const featuredRecipes = recipes.length > 0 ? recipes : [
-    { id: '1', title: 'Sorghum Quinoa Salad', image: 'https://images.unsplash.com/photo-1623428187969-5da2dcea5ebf?auto=format&fit=crop&w=400&q=80' },
-    { id: '2', title: 'Crispy Sorghum Cookies', image: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?auto=format&fit=crop&w=400&q=80' }
-  ];
+  // Ensure we always have exactly 5 recipes, sorted by views
+  const featuredRecipes = recipes.length > 0 
+    ? recipes.slice(0, 5).sort((a, b) => (b.views || 0) - (a.views || 0))
+    : [
+        { id: '1', title: 'Sorghum Quinoa Salad', image: 'https://images.unsplash.com/photo-1623428187969-5da2dcea5ebf?auto=format&fit=crop&w=400&q=80', views: 1250 },
+        { id: '2', title: 'Crispy Sorghum Cookies', image: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?auto=format&fit=crop&w=400&q=80', views: 980 },
+        { id: '3', title: 'Sorghum Bread', image: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80', views: 850 },
+        { id: '4', title: 'Sorghum Porridge', image: 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?auto=format&fit=crop&w=400&q=80', views: 720 },
+        { id: '5', title: 'Sorghum Pancake', image: 'https://images.unsplash.com/photo-1528207776546-365bb710ee93?auto=format&fit=crop&w=400&q=80', views: 650 }
+      ];
 
   const handleRecipeClick = (recipe: any) => {
     // Navigate to recipes page and set selected recipe
@@ -245,7 +247,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4 sm:space-y-6 pb-6 sm:pb-8">
+    <div className="px-4 sm:px-6 space-y-4 sm:space-y-6 pb-6 sm:pb-8">
       
       {/* Location Badge - Editable with Autocomplete */}
       <div className="flex items-center gap-2 mt-2 relative">
@@ -341,11 +343,15 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
           ) : (
             <>
               <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center space-x-2">
-                  <CloudSun size={24} />
-                  <span className="font-bold text-lg">{climate?.condition || "Cerah Berawan"}</span>
+                {/* FIXED: Icon Suhu dan Suhu Besar di kiri */}
+                <div className="flex items-center gap-3">
+                  <CloudSun size={32} className="text-white/90" />
+                  <div className="flex flex-col">
+                    <span className="text-5xl sm:text-6xl font-bold tracking-tighter leading-none">{climate?.currentTemp || 28}°C</span>
+                    <span className="text-green-50 text-xs sm:text-sm mt-1">{new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                  </div>
                 </div>
-                {/* FIXED: Humidity di atas, Wind di bawah (kanan atas) - struktur vertikal */}
+                {/* FIXED: Kolom Kanan - Humidity (atas), Wind (bawah) */}
                 <div className="flex flex-col items-end gap-1.5">
                   <div className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold border border-white/20 flex items-center gap-1">
                     <Droplets size={12} /> {climate?.humidity || 65}%
@@ -357,9 +363,8 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
                 </div>
               </div>
 
-              <div className="flex flex-col mb-4">
-                <span className="text-5xl sm:text-6xl font-bold tracking-tighter">{climate?.currentTemp || 28}°C</span>
-                <span className="text-green-50 text-xs sm:text-sm mt-1">{new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              <div className="mb-4">
+                <span className="font-bold text-base text-white/90">{climate?.condition || "Cerah Berawan"}</span>
               </div>
 
               <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/20 flex items-start gap-3">
@@ -373,25 +378,25 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
         </div>
       </div>
 
-      {/* Trending Recipes & Creative Ideas - FIXED: Carousel dengan panah */}
+      {/* Trending Recipes & Creative Ideas - FIXED: Carousel dengan panah, responsive untuk laptop */}
       <div>
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-lg text-gray-900">Trending Recipes & Creative Ideas</h3>
         </div>
         <div className="relative">
-          {/* Carousel Container */}
+          {/* Carousel Container - FIXED: Grid layout untuk laptop, carousel untuk mobile */}
           <div 
             ref={recipesCarouselRef}
-            className="flex gap-4 overflow-x-auto no-scrollbar pb-2 scroll-smooth"
+            className="flex md:grid md:grid-cols-5 gap-4 md:gap-6 overflow-x-auto no-scrollbar pb-2 -mx-6 px-6 md:mx-0 md:px-0 scroll-smooth"
             style={{ scrollBehavior: 'smooth' }}
           >
             {featuredRecipes.map(recipe => (
               <div 
                 key={recipe.id} 
                 onClick={() => handleRecipeClick(recipe)}
-                className="min-w-[200px] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden shrink-0 cursor-pointer hover:shadow-md transition-shadow"
+                className="min-w-[200px] md:min-w-0 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden shrink-0 md:shrink cursor-pointer hover:shadow-md transition-shadow"
               >
-                 <div className="h-28 overflow-hidden relative aspect-[4/3]">
+                 <div className="h-28 md:h-48 overflow-hidden relative">
                    <img src={recipe.image || recipe.image_url} alt={recipe.title} className="w-full h-full object-cover" />
                    {/* FIXED: Show views badge */}
                    {recipe.views > 0 && (
@@ -400,33 +405,37 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
                      </div>
                    )}
                  </div>
-                 <div className="p-3">
-                   <h4 className="font-bold text-gray-800 text-sm truncate">{recipe.title}</h4>
+                 <div className="p-3 md:p-4">
+                   <h4 className="font-bold text-gray-800 text-sm md:text-base truncate">{recipe.title}</h4>
                  </div>
               </div>
             ))}
           </div>
           
-          {/* Navigation Arrows */}
-          {featuredRecipes.length > 3 && (
+          {/* Navigation Arrows - Only show on mobile, hidden on desktop */}
+          {featuredRecipes.length >= 5 && (
             <>
               <button
                 onClick={() => {
                   if (recipesCarouselRef.current) {
-                    recipesCarouselRef.current.scrollBy({ left: -220, behavior: 'smooth' });
+                    const cardWidth = 200 + 16; // min-w-[200px] + gap-4 (16px)
+                    recipesCarouselRef.current.scrollBy({ left: -cardWidth, behavior: 'smooth' });
                   }
                 }}
-                className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-700 hover:bg-gray-50 transition-colors z-50"
+                className="md:hidden absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-700 hover:bg-gray-50 transition-colors z-20 border border-gray-100"
+                aria-label="Previous recipe"
               >
                 <ChevronLeft size={20} />
               </button>
               <button
                 onClick={() => {
                   if (recipesCarouselRef.current) {
-                    recipesCarouselRef.current.scrollBy({ left: 220, behavior: 'smooth' });
+                    const cardWidth = 200 + 16; // min-w-[200px] + gap-4 (16px)
+                    recipesCarouselRef.current.scrollBy({ left: cardWidth, behavior: 'smooth' });
                   }
                 }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-700 hover:bg-gray-50 transition-colors z-50"
+                className="md:hidden absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-700 hover:bg-gray-50 transition-colors z-20 border border-gray-100"
+                aria-label="Next recipe"
               >
                 <ChevronRight size={20} />
               </button>
@@ -498,7 +507,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate, user }) => {
       {/* Explore Features Grid */}
       <div>
         <h3 className="font-bold text-lg text-gray-900 mb-4">Explore Features</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4">
            <FeatureCard icon={Sprout} label="Planting Recommendations" onClick={() => onNavigate(Screen.PLANTING)} />
            <FeatureCard icon={BookOpen} label="Education & Cultivation Hub" onClick={() => onNavigate(Screen.EDUCATION)} />
            <FeatureCard icon={ChefHat} label="Recipes & Innovation" onClick={() => onNavigate(Screen.RECIPES)} />

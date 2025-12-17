@@ -324,7 +324,7 @@ app.get('/api/recipes', (req, res) => {
   });
 });
 
-// 11. GET RECIPE BY ID - FIXED: Increment views
+// 11. GET RECIPE BY ID - FIXED: Tidak increment views langsung, views akan increment setelah 3 menit
 app.get('/api/recipes/:id', (req, res) => {
   const { id } = req.params;
   const sql = 'SELECT r.*, u.full_name as author, u.avatar_url as author_avatar FROM recipes r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?';
@@ -337,18 +337,14 @@ app.get('/api/recipes/:id', (req, res) => {
     }
     const recipe = results[0];
     
-    // FIXED: Increment views
-    db.query('UPDATE recipes SET views = COALESCE(views, 0) + 1 WHERE id = ?', [id], (updateErr) => {
-      if (updateErr) {
-        console.error('Failed to increment views:', updateErr);
-      }
-    });
+    // FIXED: Views tidak di-increment langsung, akan di-increment setelah user stay 3 menit
+    // Increment views sekarang dilakukan melalui endpoint PUT /api/recipes/:id/increment-views
     
     res.json({
       success: true,
       recipe: {
         ...recipe,
-        views: (recipe.views || 0) + 1, // Show incremented value
+        views: recipe.views || 0, // Return actual views from database
         ingredients: recipe.ingredients ? JSON.parse(recipe.ingredients) : [],
         steps: recipe.steps ? JSON.parse(recipe.steps) : []
       }
@@ -368,6 +364,27 @@ app.post('/api/recipes', (req, res) => {
       return res.status(500).json({ success: false, message: 'Gagal menyimpan resep' });
     }
     res.json({ success: true, recipe: { id: result.insertId, ...req.body } });
+  });
+});
+
+// 11c. INCREMENT VIEWS (untuk tracking setelah 3 menit)
+app.put('/api/recipes/:id/increment-views', (req, res) => {
+  const { id } = req.params;
+  db.query('UPDATE recipes SET views = COALESCE(views, 0) + 1 WHERE id = ?', [id], (err) => {
+    if (err) {
+      console.error('Failed to increment views:', err);
+      return res.status(500).json({ success: false, message: 'Gagal increment views' });
+    }
+    // Get updated views count
+    db.query('SELECT views FROM recipes WHERE id = ?', [id], (selectErr, results) => {
+      if (selectErr) {
+        return res.status(500).json({ success: false, message: 'Gagal mengambil views' });
+      }
+      res.json({ 
+        success: true, 
+        views: results[0]?.views || 0 
+      });
+    });
   });
 });
 

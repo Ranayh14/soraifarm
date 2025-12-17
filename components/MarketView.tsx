@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Filter, Search, ChevronDown, TrendingUp, BarChart2, Zap, X } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Bar, BarChart } from 'recharts';
 import { getMarketStrategy } from '../services/geminiService';
-import { generateMockMarketData, formatChartDate, formatFullDate, generateDateRange } from '../utils/dateUtils';
+import { transformMarketDataToChart, generateDummyMarketData } from '../utils/chartUtils';
 
 const MarketView: React.FC = () => {
   const [marketData, setMarketData] = useState<any[]>([]);
@@ -31,12 +31,13 @@ const MarketView: React.FC = () => {
       if (Array.isArray(data) && data.length > 0) {
         setMarketData(data);
       } else {
-        // Fallback: generate data 30 hari terakhir
+        // Fallback: akan generate dummy data di transformMarketDataToChart
         setMarketData([]);
       }
       setLoading(false);
     } catch (err) {
       console.error('Failed to fetch market data:', err);
+      // Generate dummy data if API fails
       setMarketData([]);
       setLoading(false);
     }
@@ -87,42 +88,22 @@ const MarketView: React.FC = () => {
     }
   }, [marketData]);
 
-  // FIXED: Format data harian untuk chart - 1 bulan terakhir (30 hari) dengan tanggal dinamis dari utility
-  const lineData = marketData.length > 0 ? marketData
-    .map((item, index) => {
-      // Parse tanggal dari API response
-      let date: Date;
-      if (item.date && typeof item.date === 'string') {
-        const parts = item.date.split('-');
-        if (parts.length === 3) {
-          const [year, month, day] = parts.map(Number);
-          date = new Date(year, month - 1, day, 12, 0, 0);
-        } else {
-          date = new Date(item.date);
-        }
-      } else {
-        // Fallback: generate dari index (30 hari terakhir)
-        const dates = generateDateRange(30);
-        date = dates[Math.min(index, dates.length - 1)];
-      }
-      
-      const day = date.getDate();
-      const month = date.toLocaleDateString('id-ID', { month: 'short' });
-      // Tampilkan label setiap 5 hari untuk readability pada 30 hari
-      const showLabel = index % 5 === 0 || index === 0 || index === marketData.length - 1;
-      return {
-        name: showLabel ? `${day} ${month}` : `${day}`,
-        price: item.average_price || 2500,
-        vol: item.sales_volume || 100,
-        fullDate: formatFullDate(date),
-        date: date,
-        day: day,
-        month: month,
-        dateValue: date.getTime()
-      };
-    })
-    .sort((a, b) => a.dateValue - b.dateValue)
-    : generateMockMarketData(30, 2500, 100); // Generate 30 days of mock data with fluctuations
+  // FIXED: Format data harian untuk chart - 1 bulan terakhir (30 hari) dengan tanggal dinamis dari hari ini
+  // Menggunakan utility function untuk generate tanggal dan data yang realistis
+  const chartDataRaw = marketData.length > 0 
+    ? transformMarketDataToChart(marketData, 30)
+    : generateDummyMarketData(30, 2500, 100);
+
+  // Transform untuk format yang digunakan di chart (dengan label yang lebih compact untuk 30 hari)
+  const lineData = chartDataRaw.map((item, index) => {
+    // Untuk 30 hari, tampilkan label setiap 5 hari atau di hari pertama/terakhir
+    const showFullLabel = index === 0 || index === chartDataRaw.length - 1 || index % 5 === 0;
+    return {
+      ...item,
+      name: showFullLabel ? item.name : item.name.split(' ')[0], // Hanya hari jika tidak full label
+      vol: item.volume // Map volume ke vol untuk chart
+    };
+  });
 
   const barData = strategy?.profitComparison || [
     { name: 'Raw', val: 250 },
@@ -130,7 +111,7 @@ const MarketView: React.FC = () => {
   ];
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4 sm:space-y-8 pb-6 sm:pb-8 pt-2">
+    <div className="px-4 sm:px-6 space-y-4 sm:space-y-8 pb-6 sm:pb-8 pt-2">
       
       {/* Header with Search/Filter */}
       <div className="flex justify-between items-center">
@@ -142,7 +123,7 @@ const MarketView: React.FC = () => {
       <p className="text-gray-500 text-sm -mt-6">Dapatkan analisis mendalam dan rekomendasi berbasis AI untuk strategi pasar sorghum Anda.</p>
 
       {/* Dropdowns - FIXED: Z-index dan click handler */}
-      <div className="space-y-3 relative z-50">
+      <div className="space-y-3 relative z-30">
          <div className="relative">
             <button
               onClick={() => {
@@ -206,7 +187,7 @@ const MarketView: React.FC = () => {
       {/* Click outside to close dropdowns */}
       {(showProductDropdown || showLocationDropdown) && (
         <div 
-          className="fixed inset-0 z-40"
+          className="fixed inset-0 z-20"
           onClick={() => {
             setShowProductDropdown(false);
             setShowLocationDropdown(false);
@@ -269,17 +250,13 @@ const MarketView: React.FC = () => {
               <div className="text-xs text-gray-400 mt-4 leading-relaxed bg-gray-50 p-3 rounded-xl space-y-2">
                 {marketData.length >= 2 ? (
                   (() => {
-                    const latest = marketData[marketData.length - 1];
-                    const previous = marketData[marketData.length - 2];
-                    const first = marketData[0];
-                    const priceChange = ((latest.average_price - previous.average_price) / previous.average_price) * 100;
+                    const latest = lineData[lineData.length - 1];
+                    const previous = lineData[lineData.length - 2];
+                    const first = lineData[0];
+                    const priceChange = latest && previous ? ((latest.price - previous.price) / previous.price) * 100 : 0;
                     const trend = priceChange > 0 ? 'peningkatan' : priceChange < 0 ? 'penurunan' : 'stabil';
                     const today = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                    const startDate = first.date ? (() => {
-                      const [year, month, day] = first.date.split('-').map(Number);
-                      const startDateObj = new Date(year, month - 1, day);
-                      return startDateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                    })() : '';
+                    const startDate = first?.fullDate || '';
                     return (
                       <>
                         <p>

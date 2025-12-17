@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Plus, X, Check, ArrowRight, Clock, Calculator } from 'lucide-react';
 import { Recipe } from '../types';
 import { Screen } from '../types';
@@ -10,7 +10,9 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [category, setCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState(''); // FIXED: State untuk search query
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]); // FIXED: Store all recipes untuk filtering
   const [loading, setLoading] = useState(true);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [hppResult, setHppResult] = useState<any>(null);
@@ -35,6 +37,32 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
   const [submitting, setSubmitting] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
 
+  // FIXED: Track views increment untuk menghindari double-count
+  const viewsIncrementedRef = useRef<Set<string>>(new Set());
+  const viewStartTimeRef = useRef<number | null>(null);
+
+  // FIXED: Fungsi untuk filter recipes berdasarkan search query dan category
+  const applyFilters = (recipesToFilter: Recipe[], query: string, cat: string) => {
+    let filtered = [...recipesToFilter];
+
+    // Filter berdasarkan category
+    if (cat && cat !== 'All') {
+      filtered = filtered.filter(r => r.category === cat);
+    }
+
+    // Filter berdasarkan search query
+    if (query && query.trim() !== '') {
+      const lowerQuery = query.toLowerCase().trim();
+      filtered = filtered.filter(r => 
+        r.title.toLowerCase().includes(lowerQuery) ||
+        r.description?.toLowerCase().includes(lowerQuery) ||
+        r.author?.toLowerCase().includes(lowerQuery)
+      );
+    }
+
+    setRecipes(filtered);
+  };
+
   useEffect(() => {
     fetchRecipes();
     
@@ -45,6 +73,72 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
       fetchRecipeById(selectedId);
     }
   }, [category]);
+
+  // FIXED: Apply filters ketika allRecipes, searchQuery, atau category berubah
+  useEffect(() => {
+    if (allRecipes.length > 0) {
+      applyFilters(allRecipes, searchQuery, category);
+    }
+  }, [allRecipes, searchQuery, category]);
+
+  // FIXED: Track waktu ketika user membuka detail resep dan increment views setelah 3 menit
+  useEffect(() => {
+    // Reset timer jika user keluar dari detail atau pindah ke resep lain
+    if (view !== 'DETAIL' || !selectedRecipe) {
+      viewStartTimeRef.current = null;
+      return;
+    }
+
+    const recipeId = selectedRecipe.id;
+    
+    // Skip jika sudah pernah increment views untuk resep ini di session ini
+    if (viewsIncrementedRef.current.has(recipeId)) {
+      return;
+    }
+
+    // Set waktu mulai
+    viewStartTimeRef.current = Date.now();
+
+    // Set timer untuk increment views setelah 3 menit (180000 ms)
+    const timer = setTimeout(() => {
+      // Double check: masih di detail view dan resep yang sama
+      if (view === 'DETAIL' && selectedRecipe && selectedRecipe.id === recipeId) {
+        // Skip jika sudah pernah increment
+        if (viewsIncrementedRef.current.has(recipeId)) {
+          return;
+        }
+
+        // Mark sebagai sudah increment
+        viewsIncrementedRef.current.add(recipeId);
+
+        // Increment views di database
+        fetch(`http://localhost:3001/api/recipes/${recipeId}/increment-views`, {
+          method: 'PUT'
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              // Update views di state
+              setSelectedRecipe(prev => prev ? { ...prev, views: data.views } : null);
+              // Update views di recipes list juga jika ada
+              setRecipes(prevRecipes => 
+                prevRecipes.map(r => r.id === recipeId ? { ...r, views: data.views } : r)
+              );
+            }
+          })
+          .catch(err => {
+            console.error('Failed to increment views:', err);
+            // Remove from set jika gagal, agar bisa dicoba lagi
+            viewsIncrementedRef.current.delete(recipeId);
+          });
+      }
+    }, 180000); // 3 menit = 180000 ms
+
+    // Cleanup timer jika component unmount atau view berubah
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [view, selectedRecipe]);
 
   const fetchRecipes = async () => {
     setLoading(true);
@@ -71,12 +165,15 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
         author: r.author,
         authorAvatar: r.author_avatar,
         likes: r.likes || 0,
-        views: r.views || 0
+        views: r.views || 0,
+        created_at: r.created_at // FIXED: Include created_at for sorting
       }));
 
-      // Separate featured (first 3) and submissions (rest)
-      setRecipes(transformedRecipes.slice(0, 3));
-      setSubmissions(transformedRecipes.slice(3));
+      // FIXED: Store all recipes untuk filtering
+      // Filter akan diterapkan melalui useEffect ketika allRecipes di-set
+      setAllRecipes(transformedRecipes);
+      // Latest submissions: 10 resep terbaru (sudah sorted by created_at DESC dari server)
+      setSubmissions(transformedRecipes.slice(0, 10));
     } catch (error) {
       console.error('Failed to fetch recipes:', error);
     } finally {
@@ -107,7 +204,8 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
           servings: data.recipe.servings,
           author: data.recipe.author,
           authorAvatar: data.recipe.author_avatar,
-          likes: data.recipe.likes || 0
+          likes: data.recipe.likes || 0,
+          views: data.recipe.views || 0 // FIXED: Include views from database
         };
         setSelectedRecipe(recipe);
         setView('DETAIL');
@@ -124,8 +222,16 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
   };
 
   const handleRecipeClick = (r: Recipe) => {
-    setSelectedRecipe(r);
-    setView('DETAIL');
+    // FIXED: Selalu fetch dari API untuk konsistensi dan memastikan data terbaru (termasuk views)
+    // Ini memastikan semua cara membuka detail resep menggunakan cara yang sama
+    fetchRecipeById(r.id);
+  };
+
+  // FIXED: Handler untuk search query change
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    applyFilters(allRecipes, query, category);
   };
 
   const handleAddIngredient = () => {
@@ -465,14 +571,16 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
               </div>
            </div>
 
-           {/* Steps Timeline */}
+           {/* Steps Timeline - FIXED: Alignment timeline dan nomor sejajar vertikal */}
            <div>
               <h3 className="font-bold text-lg text-gray-900 mb-6">Cara Membuat</h3>
               {selectedRecipe.steps && selectedRecipe.steps.length > 0 ? (
-                <div className="relative pl-4 space-y-8">
-                   <div className="absolute left-[15px] top-2 bottom-4 w-0.5 bg-[#22c55e]/30"></div>
+                <div className="relative space-y-8">
+                   {/* FIXED: Garis timeline di center nomor - w-8 (32px) + border-4 (4px per sisi = 8px total) = 40px, center = 20px */}
+                   <div className="absolute left-[20px] top-2 bottom-4 w-0.5 bg-[#22c55e]/30"></div>
                    {selectedRecipe.steps.map((step, i) => (
                       <div key={i} className="relative pl-10">
+                         {/* FIXED: Nomor timeline - w-8 (32px) dengan border-4, center di 20px dari left-0 */}
                          <div className="absolute left-0 top-0 w-8 h-8 bg-[#dcfce7] text-[#22c55e] rounded-full flex items-center justify-center text-sm font-bold border-4 border-white z-10">
                             {i+1}
                          </div>
@@ -493,12 +601,14 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
   return (
     <div className="px-6 pt-2 pb-8 space-y-6">
       
-      {/* Search */}
+      {/* Search - FIXED: Tambahkan handler untuk search */}
       <div className="relative">
          <Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
          <input 
            type="text" 
-           placeholder="Q Search recipes or ideas..." 
+           placeholder="Search recipes or ideas..." 
+           value={searchQuery}
+           onChange={handleSearchChange}
            className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#22c55e]" 
          />
       </div>
@@ -507,10 +617,14 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
       <div>
          <h3 className="font-bold text-gray-900 mb-3">Recipe Categories</h3>
          <div className="flex gap-2 overflow-x-auto no-scrollbar">
-            {['All', 'Main Course', 'Beverages', 'Snacks'].map(cat => (
+            {['All', 'Food', 'Drink', 'Snack'].map(cat => (
                <button 
                   key={cat} 
-                  onClick={() => setCategory(cat === 'All' ? 'All' : cat)}
+                  onClick={() => {
+                    const newCategory = cat === 'All' ? 'All' : cat;
+                    setCategory(newCategory);
+                    applyFilters(allRecipes, searchQuery, newCategory);
+                  }}
                   className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
                     category === cat ? 'bg-[#22c55e] text-white' : 'border border-gray-200 text-gray-600'
                   }`}
@@ -574,7 +688,24 @@ const RecipesView: React.FC<{ onNavigate?: (screen: Screen) => void }> = ({ onNa
                         />
                         <div className="flex-1">
                            <h4 className="font-bold text-gray-900 text-sm">{submission.author || 'Anonymous'}</h4>
-                           <p className="text-xs text-gray-400 mb-3">2 hours ago</p>
+                           <p className="text-xs text-gray-400 mb-3">
+                              {submission.created_at 
+                                ? (() => {
+                                    const date = new Date(submission.created_at);
+                                    const now = new Date();
+                                    const diffMs = now.getTime() - date.getTime();
+                                    const diffMins = Math.floor(diffMs / 60000);
+                                    const diffHours = Math.floor(diffMins / 60);
+                                    const diffDays = Math.floor(diffHours / 24);
+                                    
+                                    if (diffMins < 1) return 'Baru saja';
+                                    if (diffMins < 60) return `${diffMins} menit yang lalu`;
+                                    if (diffHours < 24) return `${diffHours} jam yang lalu`;
+                                    if (diffDays < 7) return `${diffDays} hari yang lalu`;
+                                    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+                                  })()
+                                : 'Tidak diketahui'}
+                           </p>
                            <div className="flex gap-3">
                               <img src={submission.image} className="w-16 h-16 rounded-xl object-cover" alt={submission.title} />
                               <div>

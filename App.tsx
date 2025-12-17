@@ -137,8 +137,8 @@ const App: React.FC = () => {
   return (
     <ToastProvider>
       <div className="min-h-screen bg-gray-50 flex justify-center font-sans text-gray-900">
-        {/* FIXED: Responsive layout dengan max-width container untuk desktop */}
-        <div className="w-full max-w-md md:max-w-7xl md:mx-auto md:px-4 lg:px-8 bg-white min-h-screen shadow-2xl relative flex flex-col">
+        {/* FIXED: Responsive layout dengan max-width sesuai device width - full width pada semua device */}
+        <div className="w-full max-w-md md:w-full md:max-w-none md:mx-auto md:px-4 sm:px-6 lg:px-8 bg-white min-h-screen shadow-2xl relative flex flex-col">
         
         {/* HEADER - FIXED: Z-index untuk tidak tertutup, responsive padding */}
         <header className={`px-4 sm:px-6 pt-8 sm:pt-12 pb-3 sm:pb-4 flex items-center justify-between bg-white z-30 sticky top-0 ${screen === Screen.HOME ? '' : 'border-b border-gray-50'}`}>
@@ -196,7 +196,7 @@ const App: React.FC = () => {
 
         {/* BOTTOM NAV - FIXED: Responsive untuk semua device dengan z-index yang benar */}
         {showBottomNav && (
-          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md md:max-w-screen-xl bg-white/95 backdrop-blur-sm border-t border-gray-100 px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-end z-40 pb-6 sm:pb-8 safe-area-bottom">
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md md:w-full md:max-w-none bg-white/95 backdrop-blur-sm border-t border-gray-100 px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-end z-40 pb-6 sm:pb-8 safe-area-bottom">
             <NavButton icon={Home} label="Home" active={screen === Screen.HOME} onClick={() => navigate(Screen.HOME)} />
             <NavButton icon={Sprout} label="Tanam" active={screen === Screen.PLANTING} onClick={() => navigate(Screen.PLANTING)} />
             <NavButton icon={BookOpen} label="Edukasi" active={screen === Screen.EDUCATION} onClick={() => navigate(Screen.EDUCATION)} />
